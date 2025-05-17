@@ -7,6 +7,7 @@ import base64
 from werkzeug.utils import secure_filename
 import logging
 from flask_cors import CORS
+from bson.objectid import ObjectId  # Importar ObjectId para manejar IDs de MongoDB
 
 # Configuración de logging
 logging.basicConfig(level=logging.DEBUG)
@@ -36,12 +37,18 @@ def index():
     return jsonify({
         "mensaje": "Bienvenido a la API de Proyecto Vid",
         "endpoints": {
-            "registro": "/registro (POST)",
-            "login": "/login (POST)",
-            "logout": "/logout (POST)",
-            "perfil": "/perfil (GET/PUT)",
-            "imagenes": "/imagenes (GET/POST)",
-            "caidas": "/caidas (GET/POST)"
+            "registro": "/registro (POST) - Registrar nuevo usuario",
+            "login": "/login (POST) - Iniciar sesión",
+            "logout": "/logout (POST) - Cerrar sesión",
+            "perfil": "/perfil (GET/PUT) - Obtener/actualizar perfil",
+            "imagenes": "/imagenes (GET/POST) - Obtener todas/subir nueva imagen",
+            "imagenes_filtradas": "/imagenes?caida_id=ID_CAIDA (GET) - Obtener imágenes de una caída específica",
+            "caidas": "/caidas (GET/POST) - Obtener todas/registrar nueva caída",
+            "caida_especifica": "/caidas/ID_CAIDA (GET) - Obtener una caída específica con sus imágenes"
+        },
+        "documentacion": {
+            "subir_imagen": "Para subir una imagen, se debe enviar un formulario con los campos 'imagen' (archivo) y 'caida_id' (obligatorio)",
+            "registrar_caida": "Para registrar una caída, se debe enviar un JSON con los datos de la caída. Se crea con un arreglo de imágenes vacío"
         }
     })
 
@@ -138,6 +145,18 @@ def actualizar_perfil():
 def subir_imagen():
     logger.info("Iniciando proceso de subida de imagen")
     try:
+        # Verificar que se proporcionó un ID de caída
+        caida_id = request.form.get('caida_id')
+        if not caida_id:
+            logger.error("No se proporcionó ID de caída")
+            return jsonify({"error": "Se requiere el ID de la caída asociada"}), 400
+
+        # Verificar que la caída existe
+        caida = db.db.caidas.find_one({"_id": ObjectId(caida_id)})
+        if not caida:
+            logger.error(f"Caída con ID {caida_id} no encontrada")
+            return jsonify({"error": "La caída especificada no existe"}), 404
+
         if 'imagen' not in request.files:
             logger.error("No se encontró el archivo 'imagen' en la petición")
             return jsonify({"error": "No se envió ningún archivo"}), 400
@@ -178,6 +197,7 @@ def subir_imagen():
                 "url_cloudinary": cloudinary_data['url_optimizada'],
                 "url_thumbnail": cloudinary_data['url_thumbnail'],
                 "cloudinary_id": cloudinary_data['public_id'],
+                "caida_id": caida_id,  # Vinculación con la caída
                 "metadata": {
                     "formato": cloudinary_data.get('format', 'desconocido'),
                     "tamaño": cloudinary_data.get('bytes', 0),
@@ -189,10 +209,17 @@ def subir_imagen():
             
             resultado = db.guardar_imagen(imagen_data)
             
+            # Actualizar la caída con referencia a la imagen
+            db.db.caidas.update_one(
+                {"_id": ObjectId(caida_id)},
+                {"$push": {"imagenes": str(resultado['id'])}}
+            )
+            
             return jsonify({
                 "mensaje": "Imagen procesada y guardada exitosamente",
                 "datos": {
                     "id": str(resultado['id']),
+                    "caida_id": caida_id,
                     "nombre_archivo": imagen_data['nombre_archivo'],
                     "url_cloudinary": imagen_data['url_cloudinary'],
                     "url_thumbnail": imagen_data['url_thumbnail'],
@@ -211,10 +238,23 @@ def subir_imagen():
 @app.route('/imagenes', methods=['GET'])
 def obtener_imagenes():
     try:
-        imagenes = db.obtener_imagenes()
+        # Obtener parámetros de filtrado
+        caida_id = request.args.get('caida_id')
+        
+        # Construir filtro basado en los parámetros
+        filtro = {}
+        if caida_id:
+            filtro['caida_id'] = caida_id
+            
+        imagenes = db.obtener_imagenes(filtro)
         for imagen in imagenes:
             imagen['_id'] = str(imagen['_id'])
-        return jsonify({"imagenes": imagenes})
+            
+        return jsonify({
+            "imagenes": imagenes,
+            "total": len(imagenes),
+            "filtros_aplicados": {"caida_id": caida_id} if caida_id else {}
+        })
     except Exception as e:
         return jsonify({"error": f"Error al obtener imágenes: {str(e)}"}), 400
 
@@ -223,9 +263,32 @@ def obtener_caidas():
     try:
         caidas = db.obtener_caidas()
         caidas_serializadas = []
+        
         for caida in caidas:
             caida['_id'] = str(caida['_id'])
+            
+            # Verificar si la caída tiene imágenes asociadas
+            if 'imagenes' in caida and caida['imagenes']:
+                # Recuperar información de las imágenes asociadas
+                imagenes_info = []
+                for imagen_id in caida['imagenes']:
+                    try:
+                        imagen = db.db.imagenes.find_one({"_id": ObjectId(imagen_id)})
+                        if imagen:
+                            imagen['_id'] = str(imagen['_id'])
+                            imagenes_info.append({
+                                "id": imagen['_id'],
+                                "url_thumbnail": imagen.get('url_thumbnail', ''),
+                                "url_cloudinary": imagen.get('url_cloudinary', ''),
+                                "descripcion": imagen.get('descripcion', '')
+                            })
+                    except Exception as e:
+                        logger.error(f"Error al obtener imagen {imagen_id}: {str(e)}")
+                
+                caida['imagenes_info'] = imagenes_info
+            
             caidas_serializadas.append(caida)
+            
         return jsonify({"caidas": caidas_serializadas})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -239,23 +302,65 @@ def registrar_caida():
     try:
         caida_data = {
             **data,
-            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "imagenes": []  # Inicializar arreglo vacío para almacenar referencias a imágenes
         }
         resultado = db.guardar_caida(caida_data)
         
         caida_guardada = {
             "mensaje": "Caída registrada exitosamente",
             "datos": {
+                "id": str(resultado.inserted_id),  # Devolver el ID de la caída
                 "tipo": caida_data.get("tipo"),
                 "descripcion": caida_data.get("descripcion"),
                 "ubicacion": caida_data.get("ubicacion"),
-                "fecha": caida_data.get("fecha")
+                "fecha": caida_data.get("fecha"),
+                "imagenes": []
             }
         }
         
         return jsonify(caida_guardada), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@app.route('/caidas/<caida_id>', methods=['GET'])
+def obtener_caida(caida_id):
+    try:
+        # Buscar la caída por su ID
+        try:
+            caida = db.db.caidas.find_one({"_id": ObjectId(caida_id)})
+        except Exception as e:
+            return jsonify({"error": f"ID de caída inválido: {str(e)}"}), 400
+            
+        if not caida:
+            return jsonify({"error": "Caída no encontrada"}), 404
+            
+        # Convertir _id a string para serialización JSON
+        caida['_id'] = str(caida['_id'])
+        
+        # Verificar si la caída tiene imágenes asociadas
+        if 'imagenes' in caida and caida['imagenes']:
+            # Recuperar información de las imágenes asociadas
+            imagenes_info = []
+            for imagen_id in caida['imagenes']:
+                try:
+                    imagen = db.db.imagenes.find_one({"_id": ObjectId(imagen_id)})
+                    if imagen:
+                        imagen['_id'] = str(imagen['_id'])
+                        imagenes_info.append({
+                            "id": imagen['_id'],
+                            "url_thumbnail": imagen.get('url_thumbnail', ''),
+                            "url_cloudinary": imagen.get('url_cloudinary', ''),
+                            "descripcion": imagen.get('descripcion', '')
+                        })
+                except Exception as e:
+                    logger.error(f"Error al obtener imagen {imagen_id}: {str(e)}")
+            
+            caida['imagenes_info'] = imagenes_info
+        
+        return jsonify({"caida": caida})
+    except Exception as e:
+        return jsonify({"error": f"Error al obtener caída: {str(e)}"}), 400
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
