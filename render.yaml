@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: backvid
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: PORT
+        value: 5000 
