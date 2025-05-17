@@ -29,13 +29,103 @@ def allowed_file(filename):
 
 @app.route('/')
 def index():
+    logger.info("Accediendo a la ruta raíz")
     return jsonify({
         "mensaje": "Bienvenido a la API de Proyecto Vid",
         "endpoints": {
+            "registro": "/registro (POST)",
+            "login": "/login (POST)",
+            "logout": "/logout (POST)",
+            "perfil": "/perfil (GET/PUT)",
             "imagenes": "/imagenes (GET/POST)",
             "caidas": "/caidas (GET/POST)"
         }
     })
+
+@app.route('/test', methods=['GET'])
+def test():
+    logger.info("Accediendo a la ruta de prueba")
+    return jsonify({"mensaje": "El servidor está funcionando correctamente"})
+
+@app.route('/registro', methods=['POST'])
+def registro():
+    logger.info("Recibida petición de registro")
+    try:
+        data = request.get_json()
+        logger.debug(f"Datos recibidos: {data}")
+        
+        if not data:
+            logger.error("No se recibieron datos JSON")
+            return jsonify({"error": "No se recibieron datos"}), 400
+            
+        if not all(k in data for k in ('nombre', 'email', 'password')):
+            logger.error("Faltan campos requeridos")
+            return jsonify({"error": "Faltan campos requeridos (nombre, email, password)"}), 400
+        
+        success, message = db.crear_usuario(
+            data['nombre'],
+            data['email'],
+            data['password']
+        )
+        
+        if success:
+            logger.info(f"Usuario creado exitosamente: {data['email']}")
+            return jsonify({"mensaje": message}), 201
+        logger.error(f"Error al crear usuario: {message}")
+        return jsonify({"error": message}), 400
+    except Exception as e:
+        logger.error(f"Error en registro: {str(e)}")
+        return jsonify({"error": f"Error en el servidor: {str(e)}"}), 500
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    if not all(k in data for k in ('email', 'password')):
+        return jsonify({"error": "Faltan campos requeridos"}), 400
+    
+    success, result = db.verificar_usuario(data['email'], data['password'])
+    
+    if success:
+        session['user_email'] = data['email']
+        return jsonify({
+            "mensaje": "Login exitoso",
+            "usuario": {
+                "nombre": result['nombre'],
+                "email": result['email']
+            }
+        })
+    return jsonify({"error": result}), 401
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.pop('user_email', None)
+    return jsonify({"mensaje": "Sesión cerrada"})
+
+@app.route('/perfil', methods=['GET'])
+def obtener_perfil():
+    if 'user_email' not in session:
+        return jsonify({"error": "No autorizado"}), 401
+        
+    usuario = db.db.usuarios.find_one({"email": session['user_email']})
+    if usuario:
+        return jsonify({
+            "nombre": usuario['nombre'],
+            "email": usuario['email'],
+            "fecha_registro": usuario['fecha_registro']
+        })
+    return jsonify({"error": "Usuario no encontrado"}), 404
+
+@app.route('/perfil', methods=['PUT'])
+def actualizar_perfil():
+    if 'user_email' not in session:
+        return jsonify({"error": "No autorizado"}), 401
+        
+    data = request.get_json()
+    success, message = db.actualizar_usuario(session['user_email'], data)
+    
+    if success:
+        return jsonify({"mensaje": message})
+    return jsonify({"error": message}), 400
 
 @app.route('/imagenes', methods=['POST'])
 def subir_imagen():
@@ -172,4 +262,8 @@ def registrar_caida():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False) 
+    logger.info(f"Iniciando servidor en puerto {port}")
+    logger.info("Rutas disponibles:")
+    for rule in app.url_map.iter_rules():
+        logger.info(f"{rule.endpoint}: {rule.methods} {rule}")
+    app.run(host='0.0.0.0', port=port, debug=True) 
