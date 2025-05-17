@@ -60,7 +60,7 @@ class Database:
             logger.error(f"Error al conectar con MongoDB Atlas: {str(e)}")
             raise
 
-    def crear_usuario(self, nombre, email, password):
+    def crear_usuario(self, nombre, email, password, telefono):
         """
         Crea un nuevo usuario con contraseña encriptada
         """
@@ -74,6 +74,7 @@ class Database:
                 "nombre": nombre,
                 "email": email,
                 "password": generate_password_hash(password),
+                "telefono": telefono,
                 "fecha_registro": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
@@ -94,22 +95,33 @@ class Database:
         except Exception as e:
             return False, f"Error al verificar usuario: {str(e)}"
 
-    def actualizar_usuario(self, email, datos_actualizados):
+    def actualizar_usuario(self, email, datos):
         """
         Actualiza los datos de un usuario
         """
         try:
-            if "password" in datos_actualizados:
-                datos_actualizados["password"] = generate_password_hash(datos_actualizados["password"])
+            # Verificar si el usuario existe
+            if not self.db.usuarios.find_one({"email": email}):
+                return False, "Usuario no encontrado"
             
-            resultado = self.db.usuarios.update_one(
+            # Preparar los datos a actualizar
+            datos_actualizar = {}
+            if 'nombre' in datos:
+                datos_actualizar['nombre'] = datos['nombre']
+            if 'password' in datos:
+                datos_actualizar['password'] = generate_password_hash(datos['password'])
+            if 'telefono' in datos:
+                datos_actualizar['telefono'] = datos['telefono']
+            
+            if not datos_actualizar:
+                return False, "No hay datos para actualizar"
+            
+            # Actualizar el usuario
+            self.db.usuarios.update_one(
                 {"email": email},
-                {"$set": datos_actualizados}
+                {"$set": datos_actualizar}
             )
-            
-            if resultado.modified_count > 0:
-                return True, "Usuario actualizado correctamente"
-            return False, "No se encontró el usuario"
+            return True, "Usuario actualizado exitosamente"
         except Exception as e:
             return False, f"Error al actualizar usuario: {str(e)}"
 

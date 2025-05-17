@@ -58,14 +58,15 @@ def registro():
             logger.error("No se recibieron datos JSON")
             return jsonify({"error": "No se recibieron datos"}), 400
             
-        if not all(k in data for k in ('nombre', 'email', 'password')):
+        if not all(k in data for k in ('nombre', 'email', 'password', 'telefono')):
             logger.error("Faltan campos requeridos")
-            return jsonify({"error": "Faltan campos requeridos (nombre, email, password)"}), 400
+            return jsonify({"error": "Faltan campos requeridos (nombre, email, password, telefono)"}), 400
         
         success, message = db.crear_usuario(
             data['nombre'],
             data['email'],
-            data['password']
+            data['password'],
+            data['telefono']
         )
         
         if success:
