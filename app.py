@@ -104,22 +104,27 @@ def logout():
 
 @app.route('/perfil', methods=['GET'])
 def obtener_perfil():
-    usuario = db.db.usuarios.find_one({"email": request.args.get('email')})
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere el email como parámetro"}), 400
+        
+    usuario = db.db.usuarios.find_one({"email": email})
     if usuario:
         return jsonify({
             "nombre": usuario['nombre'],
             "email": usuario['email'],
+            "telefono": usuario.get('telefono', ''),
             "fecha_registro": usuario['fecha_registro']
         })
     return jsonify({"error": "Usuario no encontrado"}), 404
 
 @app.route('/perfil', methods=['PUT'])
 def actualizar_perfil():
-    data = request.get_json()
     email = request.args.get('email')
     if not email:
-        return jsonify({"error": "Se requiere email como parámetro"}), 400
+        return jsonify({"error": "Se requiere el email como parámetro"}), 400
         
+    data = request.get_json()
     success, message = db.actualizar_usuario(email, data)
     
     if success:
@@ -214,7 +219,6 @@ def obtener_imagenes():
 def obtener_caidas():
     try:
         caidas = db.obtener_caidas()
-        # Convertir ObjectId a string para cada caída
         caidas_serializadas = []
         for caida in caidas:
             caida['_id'] = str(caida['_id'])
@@ -236,7 +240,6 @@ def registrar_caida():
         }
         resultado = db.guardar_caida(caida_data)
         
-        # Convertir el resultado a un diccionario serializable
         caida_guardada = {
             "mensaje": "Caída registrada exitosamente",
             "datos": {
