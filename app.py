@@ -6,12 +6,15 @@ import datetime
 import base64
 from werkzeug.utils import secure_filename
 import logging
+from flask_cors import CORS
 
 # Configuración de logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# Configurar CORS para permitir todas las solicitudes
+CORS(app, resources={r"/*": {"origins": "*"}})
 app.secret_key = os.urandom(24)  # Clave secreta para las sesiones
 db = Database()
 
