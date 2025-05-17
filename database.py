@@ -62,18 +62,18 @@ class Database:
 
     def crear_usuario(self, nombre, email, password, telefono):
         """
-        Crea un nuevo usuario con contraseña encriptada
+        Crea un nuevo usuario sin encriptar la contraseña
         """
         try:
             # Verificar si el email ya existe
             if self.db.usuarios.find_one({"email": email}):
                 return False, "El email ya está registrado"
 
-            # Crear el usuario con contraseña encriptada
+            # Crear el usuario sin encriptar la contraseña
             usuario = {
                 "nombre": nombre,
                 "email": email,
-                "password": generate_password_hash(password),
+                "password": password,  # Contraseña sin encriptar
                 "telefono": telefono,
                 "fecha_registro": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
@@ -85,11 +85,11 @@ class Database:
 
     def verificar_usuario(self, email, password):
         """
-        Verifica las credenciales de un usuario
+        Verifica las credenciales de un usuario (comparación directa de contraseña sin encriptación)
         """
         try:
             usuario = self.db.usuarios.find_one({"email": email})
-            if usuario and check_password_hash(usuario["password"], password):
+            if usuario and usuario["password"] == password:  # Comparación directa
                 return True, usuario
             return False, "Credenciales inválidas"
         except Exception as e:
@@ -109,7 +109,7 @@ class Database:
             if 'nombre' in datos:
                 datos_actualizar['nombre'] = datos['nombre']
             if 'password' in datos:
-                datos_actualizar['password'] = generate_password_hash(datos['password'])
+                datos_actualizar['password'] = datos['password']  # Contraseña sin encriptar
             if 'telefono' in datos:
                 datos_actualizar['telefono'] = datos['telefono']
             
