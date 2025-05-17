@@ -211,8 +211,16 @@ def obtener_imagenes():
 
 @app.route('/caidas', methods=['GET'])
 def obtener_caidas():
-    caidas = db.obtener_caidas()
-    return jsonify({"caidas": caidas})
+    try:
+        caidas = db.obtener_caidas()
+        # Convertir ObjectId a string para cada caída
+        caidas_serializadas = []
+        for caida in caidas:
+            caida['_id'] = str(caida['_id'])
+            caidas_serializadas.append(caida)
+        return jsonify({"caidas": caidas_serializadas})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/caidas', methods=['POST'])
 def registrar_caida():
@@ -221,11 +229,24 @@ def registrar_caida():
         return jsonify({"error": "Se requieren datos de la caída"}), 400
     
     try:
-        resultado = db.guardar_caida({
+        caida_data = {
             **data,
             "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-        return jsonify({"mensaje": "Caída registrada exitosamente", "datos": resultado}), 201
+        }
+        resultado = db.guardar_caida(caida_data)
+        
+        # Convertir el resultado a un diccionario serializable
+        caida_guardada = {
+            "mensaje": "Caída registrada exitosamente",
+            "datos": {
+                "tipo": caida_data.get("tipo"),
+                "descripcion": caida_data.get("descripcion"),
+                "ubicacion": caida_data.get("ubicacion"),
+                "fecha": caida_data.get("fecha")
+            }
+        }
+        
+        return jsonify(caida_guardada), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
