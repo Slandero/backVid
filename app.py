@@ -103,10 +103,7 @@ def logout():
 
 @app.route('/perfil', methods=['GET'])
 def obtener_perfil():
-    if 'user_email' not in session:
-        return jsonify({"error": "No autorizado"}), 401
-        
-    usuario = db.db.usuarios.find_one({"email": session['user_email']})
+    usuario = db.db.usuarios.find_one({"email": request.args.get('email')})
     if usuario:
         return jsonify({
             "nombre": usuario['nombre'],
@@ -117,11 +114,12 @@ def obtener_perfil():
 
 @app.route('/perfil', methods=['PUT'])
 def actualizar_perfil():
-    if 'user_email' not in session:
-        return jsonify({"error": "No autorizado"}), 401
-        
     data = request.get_json()
-    success, message = db.actualizar_usuario(session['user_email'], data)
+    email = request.args.get('email')
+    if not email:
+        return jsonify({"error": "Se requiere email como parámetro"}), 400
+        
+    success, message = db.actualizar_usuario(email, data)
     
     if success:
         return jsonify({"mensaje": message})
@@ -131,20 +129,11 @@ def actualizar_perfil():
 def subir_imagen():
     logger.info("Iniciando proceso de subida de imagen")
     try:
-        # Verificar si se envió un archivo
-        logger.debug("Verificando archivos en la petición")
-        logger.debug(f"Files en request: {request.files}")
-        logger.debug(f"Form data: {request.form}")
-        logger.debug(f"Headers: {request.headers}")
-        
         if 'imagen' not in request.files:
             logger.error("No se encontró el archivo 'imagen' en la petición")
             return jsonify({"error": "No se envió ningún archivo"}), 400
         
         file = request.files['imagen']
-        logger.debug(f"Archivo recibido: {file.filename}")
-        logger.debug(f"Tipo de contenido: {file.content_type}")
-        
         if file.filename == '':
             logger.error("Nombre de archivo vacío")
             return jsonify({"error": "No se seleccionó ningún archivo"}), 400
@@ -153,22 +142,15 @@ def subir_imagen():
             logger.error(f"Tipo de archivo no permitido: {file.filename}")
             return jsonify({"error": "Tipo de archivo no permitido"}), 400
 
-        # Guardar el archivo temporalmente
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        logger.debug(f"Guardando archivo temporalmente en: {filepath}")
         
         try:
-            # Verificar que el directorio existe
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            
-            # Guardar el archivo
             file.save(filepath)
             
-            # Verificar que el archivo se guardó correctamente
             if os.path.exists(filepath):
                 logger.info(f"Archivo guardado exitosamente en: {filepath}")
-                logger.debug(f"Tamaño del archivo: {os.path.getsize(filepath)} bytes")
             else:
                 raise Exception("El archivo no se guardó correctamente")
                 
@@ -176,17 +158,11 @@ def subir_imagen():
             logger.error(f"Error al guardar archivo temporal: {str(e)}")
             raise
 
-        # Generar un nombre único para la imagen en Cloudinary
         nombre_publico = f"imagen_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        logger.debug(f"Nombre público generado: {nombre_publico}")
         
         try:
-            # Subir la imagen a Cloudinary
-            logger.info("Iniciando subida a Cloudinary")
             cloudinary_data = db.subir_imagen_cloudinary(filepath, nombre_publico)
-            logger.info("Imagen subida exitosamente a Cloudinary")
             
-            # Preparar los datos para guardar en MongoDB
             imagen_data = {
                 "descripcion": request.form.get('descripcion', ''),
                 "nombre_archivo": filename,
@@ -202,9 +178,7 @@ def subir_imagen():
                 "fecha_subida": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-            logger.debug("Guardando datos en MongoDB")
             resultado = db.guardar_imagen(imagen_data)
-            logger.info("Datos guardados exitosamente en MongoDB")
             
             return jsonify({
                 "mensaje": "Imagen procesada y guardada exitosamente",
@@ -218,22 +192,17 @@ def subir_imagen():
             }), 201
             
         finally:
-            # Limpiar: eliminar el archivo temporal
             if os.path.exists(filepath):
-                logger.debug(f"Eliminando archivo temporal: {filepath}")
                 os.remove(filepath)
-                logger.info("Archivo temporal eliminado")
                 
     except Exception as e:
         logger.error(f"Error en el proceso de subida: {str(e)}")
-        logger.exception("Detalles del error:")
         return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 400
 
 @app.route('/imagenes', methods=['GET'])
 def obtener_imagenes():
     try:
         imagenes = db.obtener_imagenes()
-        # Convertir ObjectId a string para la serialización JSON
         for imagen in imagenes:
             imagen['_id'] = str(imagen['_id'])
         return jsonify({"imagenes": imagenes})
