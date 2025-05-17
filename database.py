@@ -8,6 +8,12 @@ import datetime
 import requests
 from urllib.parse import urlparse
 import mimetypes
+from werkzeug.security import generate_password_hash, check_password_hash
+import logging
+
+# Configuración de logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Cargar variables de entorno
 load_dotenv()
@@ -22,15 +28,16 @@ cloudinary.config(
 
 class Database:
     def __init__(self):
+        logger.info("Inicializando conexión a Cloudinary y MongoDB")
         # Verificar configuración de Cloudinary
         try:
             # Intentar una operación simple de Cloudinary
             cloudinary.uploader.upload("https://res.cloudinary.com/demo/image/upload/sample.jpg", 
                                      public_id="test_connection",
                                      overwrite=True)
-            print("Conexión a Cloudinary establecida correctamente")
+            logger.info("Conexión a Cloudinary establecida correctamente")
         except Exception as e:
-            print(f"Error al conectar con Cloudinary: {str(e)}")
+            logger.error(f"Error al conectar con Cloudinary: {str(e)}")
             print("Por favor, verifica que las credenciales de Cloudinary sean correctas")
             raise
 
@@ -48,10 +55,63 @@ class Database:
         # Verificar la conexión
         try:
             self.client.server_info()
-            print("Conexión a MongoDB Atlas establecida correctamente")
+            logger.info("Conexión a MongoDB Atlas establecida correctamente")
         except Exception as e:
-            print(f"Error al conectar con MongoDB Atlas: {str(e)}")
+            logger.error(f"Error al conectar con MongoDB Atlas: {str(e)}")
             raise
+
+    def crear_usuario(self, nombre, email, password):
+        """
+        Crea un nuevo usuario con contraseña encriptada
+        """
+        try:
+            # Verificar si el email ya existe
+            if self.db.usuarios.find_one({"email": email}):
+                return False, "El email ya está registrado"
+
+            # Crear el usuario con contraseña encriptada
+            usuario = {
+                "nombre": nombre,
+                "email": email,
+                "password": generate_password_hash(password),
+                "fecha_registro": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            resultado = self.db.usuarios.insert_one(usuario)
+            return True, f"Usuario creado con ID: {resultado.inserted_id}"
+        except Exception as e:
+            return False, f"Error al crear usuario: {str(e)}"
+
+    def verificar_usuario(self, email, password):
+        """
+        Verifica las credenciales de un usuario
+        """
+        try:
+            usuario = self.db.usuarios.find_one({"email": email})
+            if usuario and check_password_hash(usuario["password"], password):
+                return True, usuario
+            return False, "Credenciales inválidas"
+        except Exception as e:
+            return False, f"Error al verificar usuario: {str(e)}"
+
+    def actualizar_usuario(self, email, datos_actualizados):
+        """
+        Actualiza los datos de un usuario
+        """
+        try:
+            if "password" in datos_actualizados:
+                datos_actualizados["password"] = generate_password_hash(datos_actualizados["password"])
+            
+            resultado = self.db.usuarios.update_one(
+                {"email": email},
+                {"$set": datos_actualizados}
+            )
+            
+            if resultado.modified_count > 0:
+                return True, "Usuario actualizado correctamente"
+            return False, "No se encontró el usuario"
+        except Exception as e:
+            return False, f"Error al actualizar usuario: {str(e)}"
 
     def validar_url_imagen(self, url):
         """
@@ -77,23 +137,24 @@ class Database:
         except Exception as e:
             return False, f"Error al validar URL: {str(e)}"
 
-    def subir_imagen_cloudinary(self, url_imagen, nombre_publico):
+    def subir_imagen_cloudinary(self, ruta_archivo, nombre_publico):
         """
         Sube una imagen a Cloudinary y devuelve la URL optimizada
         """
         try:
-            print(f"\nIniciando subida a Cloudinary...")
-            print(f"URL/Ruta de imagen: {url_imagen}")
-            print(f"Nombre público: {nombre_publico}")
+            logger.info(f"Iniciando subida a Cloudinary")
+            logger.debug(f"Ruta de archivo: {ruta_archivo}")
+            logger.debug(f"Nombre público: {nombre_publico}")
 
-            # Validar la URL antes de subir
-            es_valida, mensaje = self.validar_url_imagen(url_imagen)
-            if not es_valida:
-                raise Exception(f"URL de imagen inválida: {mensaje}")
+            # Verificar que el archivo existe
+            if not os.path.exists(ruta_archivo):
+                logger.error(f"El archivo no existe: {ruta_archivo}")
+                raise Exception(f"El archivo no existe: {ruta_archivo}")
 
             # Subir la imagen a Cloudinary con opciones adicionales
+            logger.debug("Iniciando upload a Cloudinary")
             upload_result = cloudinary.uploader.upload(
-                url_imagen,
+                ruta_archivo,
                 public_id=nombre_publico,
                 fetch_format="auto",
                 quality="auto",
@@ -104,8 +165,8 @@ class Database:
                 ]
             )
             
-            print("Imagen subida exitosamente a Cloudinary")
-            print(f"URL original: {upload_result['secure_url']}")
+            logger.info("Imagen subida exitosamente a Cloudinary")
+            logger.debug(f"URL original: {upload_result['secure_url']}")
             
             # Obtener URL optimizada
             optimize_url, _ = cloudinary_url(
@@ -123,9 +184,9 @@ class Database:
                 gravity="auto"
             )
             
-            print("URLs generadas:")
-            print(f"- Optimizada: {optimize_url}")
-            print(f"- Thumbnail: {thumbnail_url}")
+            logger.debug("URLs generadas:")
+            logger.debug(f"- Optimizada: {optimize_url}")
+            logger.debug(f"- Thumbnail: {thumbnail_url}")
             
             return {
                 "url_original": upload_result["secure_url"],
@@ -140,9 +201,10 @@ class Database:
                 "resource_type": upload_result.get("resource_type", "image")
             }
         except Exception as e:
-            print(f"\nError al subir imagen a Cloudinary:")
-            print(f"Tipo de error: {type(e).__name__}")
-            print(f"Mensaje de error: {str(e)}")
+            logger.error(f"Error al subir imagen a Cloudinary:")
+            logger.error(f"Tipo de error: {type(e).__name__}")
+            logger.error(f"Mensaje de error: {str(e)}")
+            logger.exception("Detalles del error:")
             raise
 
     def guardar_usuario(self, datos_usuario):
@@ -156,76 +218,19 @@ class Database:
         Guarda la URL y datos de una imagen en la colección 'imagenes'
         """
         try:
-            print("\nIniciando proceso de guardado de imagen...")
+            logger.info("Iniciando proceso de guardado de imagen en MongoDB")
+            logger.debug(f"Datos a guardar: {datos_imagen}")
             
-            # Preparar los datos básicos de la imagen
-            imagen_data = {
-                "descripcion": datos_imagen.get("descripcion", ""),
-                "fecha_subida": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "tipo_entrada": "url" if datos_imagen.get("url", "").startswith(("http://", "https://")) else "local"
-            }
-
-            # Si la imagen viene como URL o ruta local, la subimos a Cloudinary
-            if "url" in datos_imagen:
-                print(f"Tipo de entrada: {imagen_data['tipo_entrada']}")
-                print(f"URL/Ruta de imagen: {datos_imagen['url']}")
-                
-                # Generar un nombre público único
-                nombre_publico = f"imagen_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                
-                # Subir a Cloudinary
-                cloudinary_data = self.subir_imagen_cloudinary(
-                    datos_imagen["url"],
-                    nombre_publico
-                )
-                
-                # Actualizar los datos con la información de Cloudinary
-                imagen_data.update({
-                    "url_original": cloudinary_data["url_original"],
-                    "url_optimizada": cloudinary_data["url_optimizada"],
-                    "url_thumbnail": cloudinary_data["url_thumbnail"],
-                    "cloudinary_id": cloudinary_data["public_id"],
-                    "url_fuente": datos_imagen["url"],
-                    "estado": "procesada",
-                    "metadata": {
-                        "formato": cloudinary_data.get("format", "desconocido"),
-                        "tamaño": cloudinary_data.get("bytes", 0),
-                        "ancho": cloudinary_data.get("width", 0),
-                        "alto": cloudinary_data.get("height", 0)
-                    }
-                })
-                print("Datos de Cloudinary agregados correctamente")
-            else:
-                print("No se proporcionó URL o ruta de imagen")
-                imagen_data["estado"] = "error"
-                imagen_data["error"] = "No se proporcionó URL o ruta de imagen"
-
-            # Guardar en MongoDB
-            print("\nGuardando en MongoDB...")
-            resultado = self.db.imagenes.insert_one(imagen_data)
-            print(f"Imagen guardada en MongoDB con ID: {resultado.inserted_id}")
+            resultado = self.db.imagenes.insert_one(datos_imagen)
+            logger.info(f"Imagen guardada en MongoDB con ID: {resultado.inserted_id}")
             
-            # Devolver el ID y los datos guardados
             return {
                 "id": resultado.inserted_id,
-                "datos": imagen_data
+                "datos": datos_imagen
             }
-
         except Exception as e:
-            print(f"\nError al procesar la imagen:")
-            print(f"Tipo de error: {type(e).__name__}")
-            print(f"Mensaje de error: {str(e)}")
-            
-            # Guardar el error en la base de datos
-            error_data = {
-                "descripcion": datos_imagen.get("descripcion", ""),
-                "fecha_subida": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "estado": "error",
-                "error": str(e),
-                "url_fuente": datos_imagen.get("url", "")
-            }
-            self.db.imagenes.insert_one(error_data)
-            print("Error guardado en la base de datos")
+            logger.error(f"Error al guardar imagen en MongoDB: {str(e)}")
+            logger.exception("Detalles del error:")
             raise
 
     def guardar_caida(self, datos_caida):

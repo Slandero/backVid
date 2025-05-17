@@ -1,5 +1,6 @@
 pymongo==4.6.1
 python-dotenv==1.0.0
-cloudinary==1.41.0
-requests==2.32.3
-charset-normalizer==3.4.2 
+cloudinary==1.37.0
+requests==2.31.0
+Flask==3.0.2
+Werkzeug==3.0.1 
