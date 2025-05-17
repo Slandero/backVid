@@ -45,6 +45,7 @@ def subir_imagen():
         logger.debug("Verificando archivos en la petición")
         logger.debug(f"Files en request: {request.files}")
         logger.debug(f"Form data: {request.form}")
+        logger.debug(f"Headers: {request.headers}")
         
         if 'imagen' not in request.files:
             logger.error("No se encontró el archivo 'imagen' en la petición")
@@ -52,6 +53,7 @@ def subir_imagen():
         
         file = request.files['imagen']
         logger.debug(f"Archivo recibido: {file.filename}")
+        logger.debug(f"Tipo de contenido: {file.content_type}")
         
         if file.filename == '':
             logger.error("Nombre de archivo vacío")
@@ -67,8 +69,19 @@ def subir_imagen():
         logger.debug(f"Guardando archivo temporalmente en: {filepath}")
         
         try:
+            # Verificar que el directorio existe
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            # Guardar el archivo
             file.save(filepath)
-            logger.info("Archivo guardado temporalmente con éxito")
+            
+            # Verificar que el archivo se guardó correctamente
+            if os.path.exists(filepath):
+                logger.info(f"Archivo guardado exitosamente en: {filepath}")
+                logger.debug(f"Tamaño del archivo: {os.path.getsize(filepath)} bytes")
+            else:
+                raise Exception("El archivo no se guardó correctamente")
+                
         except Exception as e:
             logger.error(f"Error al guardar archivo temporal: {str(e)}")
             raise
